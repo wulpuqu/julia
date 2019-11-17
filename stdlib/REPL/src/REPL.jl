@@ -118,7 +118,7 @@ const softscope! = softscope
 
 const repl_ast_transforms = Any[softscope] # defaults for new REPL backends
 
-function eval_user_input(@nospecialize(ast), backend::REPLBackend)
+function eval_user_input(@nospecialize(ast), backend::REPLBackend, mod::Module)
     lasterr = nothing
     Base.sigatomic_begin()
     while true
@@ -131,10 +131,10 @@ function eval_user_input(@nospecialize(ast), backend::REPLBackend)
                 for xf in backend.ast_transforms
                     ast = Base.invokelatest(xf, ast)
                 end
-                value = Core.eval(Main, ast)
+                value = Core.eval(mod, ast)
                 backend.in_eval = false
                 # note: use jl_set_global to make sure value isn't passed through `expand`
-                ccall(:jl_set_global, Cvoid, (Any, Any, Any), Main, :ans, value)
+                ccall(:jl_set_global, Cvoid, (Any, Any, Any), mod, :ans, value)
                 put!(backend.response_channel, (value,false))
             end
             break
@@ -158,30 +158,30 @@ end
 
     Deprecated since sync / async behavior cannot be selected
 """
-function start_repl_backend(repl_channel::Channel, response_channel::Channel)
+function start_repl_backend(repl_channel::Channel, response_channel::Channel; get_module::Function = ()->Main)
     # Maintain legacy behavior of asynchronous backend
     backend = REPLBackend(repl_channel, response_channel, false)
     # Assignment will be made twice, but will be immediately available
-    backend.backend_task = @async start_repl_backend(backend)
+    backend.backend_task = @async start_repl_backend(backend; get_module)
     return backend
 end
 
 """
     start_repl_backend(backend::REPLBackend)
-
+p
     Call directly to run backend loop on current Task.
     Use @async for run backend on new Task.
 
     Does not return backend until loop is finished.
 """
-function start_repl_backend(backend::REPLBackend,  @nospecialize(consumer = x -> nothing))
+function start_repl_backend(backend::REPLBackend,  @nospecialize(consumer = x -> nothing); get_module::Function = ()->Main)
     backend.backend_task = Base.current_task()
     consumer(backend)
-    repl_backend_loop(backend)
+    repl_backend_loop(backend, get_module)
     return backend
 end
 
-function repl_backend_loop(backend::REPLBackend)
+function repl_backend_loop(backend::REPLBackend, get_module::Function)
     # include looks at this to determine the relative include path
     # nothing means cwd
     while true
@@ -192,7 +192,7 @@ function repl_backend_loop(backend::REPLBackend)
             # exit flag
             break
         end
-        eval_user_input(ast, backend)
+        eval_user_input(ast, backend, get_module())
     end
     nothing
 end
@@ -209,7 +209,7 @@ function display(d::REPLDisplay, mime::MIME"text/plain", x)
         if isdefined(d.repl, :options) && isdefined(d.repl.options, :iocontext)
             # this can override the :limit property set initially
             io = foldl(IOContext, d.repl.options.iocontext,
-                       init=IOContext(io, :limit => true, :module => Main))
+                       init=IOContext(io, :limit => true, :module => active_module(d)))
         end
         show(io, mime, x)
         println(io)
@@ -221,7 +221,7 @@ display(d::REPLDisplay, x) = display(d, MIME("text/plain"), x)
 function print_response(repl::AbstractREPL, @nospecialize(response), show_value::Bool, have_color::Bool)
     repl.waserror = response[2]
     with_methodtable_hint(repl) do io
-        io = IOContext(io, :module => Main)
+        io = IOContext(io, :module => active_module(repl))
         print_response(io, response, show_value, have_color, specialdisplay(repl))
     end
     nothing
@@ -277,6 +277,7 @@ struct REPLBackendRef
     repl_channel::Channel
     response_channel::Channel
 end
+
 REPLBackendRef(backend::REPLBackend) = REPLBackendRef(backend.repl_channel,backend.response_channel)
 
 """
@@ -290,11 +291,12 @@ REPLBackendRef(backend::REPLBackend) = REPLBackendRef(backend.repl_channel,backe
 function run_repl(repl::AbstractREPL, @nospecialize(consumer = x -> nothing); backend_on_current_task::Bool = true)
     backend = REPLBackend()
     backend_ref = REPLBackendRef(backend)
+    get_module = () -> active_module(repl)
     if backend_on_current_task
         @async run_frontend(repl, backend_ref)
-        start_repl_backend(backend,consumer)
+        start_repl_backend(backend, consumer; get_module)
     else
-        @async start_repl_backend(backend,consumer)
+        @async start_repl_backend(backend, consumer; get_module)
         run_frontend(repl, backend_ref)
     end
     return backend
@@ -456,20 +458,24 @@ LineEditREPL(t::TextTerminal, hascolor::Bool, envcolors::Bool=false) =
         false, false, false, envcolors
     )
 
+active_module(repl::LineEditREPL) = repl.mistate.active_module
+active_module(::AbstractREPL) = Main
+active_module(d::REPLDisplay) = active_module(d.repl)
+
 mutable struct REPLCompletionProvider <: CompletionProvider end
 mutable struct ShellCompletionProvider <: CompletionProvider end
 struct LatexCompletions <: CompletionProvider end
 
 beforecursor(buf::IOBuffer) = String(buf.data[1:buf.ptr-1])
 
-function complete_line(c::REPLCompletionProvider, s)
+function complete_line(c::REPLCompletionProvider, s, mod::Module)
     partial = beforecursor(s.input_buffer)
     full = LineEdit.input_string(s)
-    ret, range, should_complete = completions(full, lastindex(partial))
+    ret, range, should_complete = completions(full, lastindex(partial), mod)
     return unique!(map(completion_text, ret)), partial[range], should_complete
 end
 
-function complete_line(c::ShellCompletionProvider, s)
+function complete_line(c::ShellCompletionProvider, s, ::Module)
     # First parse everything up to the current position
     partial = beforecursor(s.input_buffer)
     full = LineEdit.input_string(s)
@@ -477,7 +483,7 @@ function complete_line(c::ShellCompletionProvider, s)
     return unique!(map(completion_text, ret)), partial[range], should_complete
 end
 
-function complete_line(c::LatexCompletions, s)
+function complete_line(c::LatexCompletions, s, ::Module)
     partial = beforecursor(LineEdit.buffer(s))
     full = LineEdit.input_string(s)
     ret, range, should_complete = bslash_completions(full, lastindex(partial))[2]
@@ -884,6 +890,15 @@ repl_filename(repl, hp) = "REPL"
 const JL_PROMPT_PASTE = Ref(true)
 enable_promptpaste(v::Bool) = JL_PROMPT_PASTE[] = v
 
+function contextual_prompt(repl::LineEditREPL, prompt::Union{String,Function})
+    function ()
+        mod = repl.mistate.active_module
+        prefix = mod == Main ? "" : string('(', mod, ") ")
+        pr = prompt isa String ? prompt : prompt()
+        prefix * pr
+    end
+end
+
 setup_interface(
     repl::LineEditREPL;
     # those keyword arguments may be deprecated eventually in favor of the Options mechanism
@@ -928,7 +943,7 @@ function setup_interface(
     replc = REPLCompletionProvider()
 
     # Set up the main Julia prompt
-    julia_prompt = Prompt(JULIA_PROMPT;
+    julia_prompt = Prompt(contextual_prompt(repl, JULIA_PROMPT);
         # Copy colors from the prompt object
         prompt_prefix = hascolor ? repl.prompt_color : "",
         prompt_suffix = hascolor ?
@@ -938,16 +953,15 @@ function setup_interface(
         on_enter = return_callback)
 
     # Setup help mode
-    help_mode = Prompt("help?> ",
+    help_mode = Prompt(contextual_prompt(repl, "help?> "),
         prompt_prefix = hascolor ? repl.help_color : "",
         prompt_suffix = hascolor ?
             (repl.envcolors ? Base.input_color : repl.input_color) : "",
         repl = repl,
         complete = replc,
         # When we're done transform the entered line into a call to helpmode function
-        on_done = respond(line->helpmode(outstream(repl), line), repl, julia_prompt,
-                          pass_empty=true, suppress_on_semicolon=false))
-
+        on_done = respond(line->helpmode(outstream(repl), line, repl.mistate.active_module),
+                          repl, julia_prompt, pass_empty=true, suppress_on_semicolon=false))
 
     # Set up shell mode
     shell_mode = Prompt("shell> ";
