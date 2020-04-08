@@ -44,6 +44,7 @@
  *        specified.
  */
 #if defined(__GNUC__)
+#  define jl_fence() __atomic_thread_fence(__ATOMIC_SEQ_CST)
 #  define jl_signal_fence() __atomic_signal_fence(__ATOMIC_SEQ_CST)
 #  define jl_atomic_fetch_add_relaxed(obj, arg)         \
     __atomic_fetch_add(obj, arg, __ATOMIC_RELAXED)
@@ -96,7 +97,8 @@
 #  define jl_atomic_load_relaxed(obj)           \
     __atomic_load_n(obj, __ATOMIC_RELAXED)
 #elif defined(_COMPILER_MICROSOFT_)
-#  define jl_signal_fence() _ReadWriteBarrier()
+#  define jl_fence() _ReadWriteBarrier()
+#  define jl_signal_fence() jl_fence()
 
 // add
 template<typename T, typename T2>

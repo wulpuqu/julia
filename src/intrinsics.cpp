@@ -25,6 +25,12 @@ static void jl_init_intrinsic_functions_codegen(Module *m)
     args4.push_back(T_prjlvalue); \
     args4.push_back(T_prjlvalue); \
     args4.push_back(T_prjlvalue);
+    std::vector<Type *> args5(0); \
+    args5.push_back(T_prjlvalue); \
+    args5.push_back(T_prjlvalue); \
+    args5.push_back(T_prjlvalue); \
+    args5.push_back(T_prjlvalue); \
+    args5.push_back(T_prjlvalue);
 
 #define ADD_I(name, nargs) do { \
         Function *func = Function::Create(FunctionType::get(T_prjlvalue, args##nargs, false), \
@@ -907,6 +913,12 @@ static jl_cgval_t emit_intrinsic(jl_codectx_t &ctx, intrinsic f, jl_value_t **ar
         return emit_pointerref(ctx, argv);
     case pointerset:
         return emit_pointerset(ctx, argv);
+    case atomics_fence:
+    case atomics_pointerref:
+    case atomics_pointerset:
+    case atomics_pointercmpxchg:
+    case atomics_pointerop:
+        return emit_runtime_call(ctx, f, argv, nargs);
     case bitcast:
         return generic_bitcast(ctx, argv);
     case trunc_int:
