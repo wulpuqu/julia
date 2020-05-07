@@ -35,9 +35,19 @@ function find_curl()
     end
 end
 
+# Clear libpath for invoking system executables that we generally don't want to be confused
+# by things like a libcurl that sits in Julia's private libdir.
+function clear_libpath(cmd)
+    setenv(cmd,
+        "LD_LIBRARY_PATH" => nothing,
+        "DYLD_FALLBACK_LIBRARY_PATH" => nothing,
+        "DYLD_LIBRARY_PATH" => nothing,
+    )
+end
+
 function download_curl(curl_exe::AbstractString, url::AbstractString, filename::AbstractString)
     err = PipeBuffer()
-    process = run(pipeline(`$curl_exe -s -S -g -L -f -o $filename $url`, stderr=err), wait=false)
+    process = run(pipeline(clear_libpath(`$curl_exe -s -S -g -L -f -o $filename $url`), stderr=err), wait=false)
     if !success(process)
         error_msg = readline(err)
         @error "Download failed: $error_msg"
@@ -64,14 +74,14 @@ function download(url::AbstractString, filename::AbstractString)
         return download_powershell(url, filename)
     elseif Sys.which("wget") !== nothing
         try
-            run(`wget -O $filename $url`)
+            run(clear_libpath(`wget -O $filename $url`))
         catch
             rm(filename, force=true)  # wget always creates a file
             rethrow()
         end
     elseif Sys.which("busybox") !== nothing
         try
-            run(`busybox wget -O $filename $url`)
+            run(clear_libpath(`busybox wget -O $filename $url`))
         catch
             rm(filename, force=true)  # wget always creates a file
             rethrow()
