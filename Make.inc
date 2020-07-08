@@ -604,10 +604,29 @@ else
 endif
 
 # On Windows, we want shared library files to end up in $(build_bindir), instead of $(build_libdir)
+# We also don't really have a private bindir on windows right now, due to lack of RPATH.
 ifeq ($(OS),WINNT)
 build_shlibdir := $(build_bindir)
+shlibdir := $(bindir)
+private_shlibdir := $(bindir)
 else
 build_shlibdir := $(build_libdir)
+shlibdir := $(libdir)
+private_shlibdir := $(private_libdir)
+endif
+
+# If we're on windows, don't do versioned shared libraries.  If we're on OSX,
+# put the version number before the .dylib.  Otherwise, put it after.
+ifeq ($(OS), WINNT)
+JL_MAJOR_MINOR_SHLIB_EXT := $(SHLIB_EXT)
+else
+ifeq ($(OS), Darwin)
+JL_MAJOR_MINOR_SHLIB_EXT := $(SOMAJOR).$(SOMINOR).$(SHLIB_EXT)
+JL_MAJOR_SHLIB_EXT := $(SOMAJOR).$(SHLIB_EXT)
+else
+JL_MAJOR_MINOR_SHLIB_EXT := $(SHLIB_EXT).$(SOMAJOR).$(SOMINOR)
+JL_MAJOR_SHLIB_EXT := $(SHLIB_EXT).$(SOMAJOR)
+endif
 endif
 
 ifeq ($(OS), FreeBSD)
@@ -1449,6 +1468,40 @@ JULIA_EXECUTABLE := $(JULIA_EXECUTABLE_$(JULIA_BUILD_MODE))
 JULIA_SYSIMG_debug := $(build_private_libdir)/sys-debug.$(SHLIB_EXT)
 JULIA_SYSIMG_release := $(build_private_libdir)/sys.$(SHLIB_EXT)
 JULIA_SYSIMG := $(JULIA_SYSIMG_$(JULIA_BUILD_MODE))
+
+define dep_lib_path
+$$($(PYTHON) $(call python_cygpath,$(JULIAHOME)/contrib/relative_path.py) $(1) $(2))
+endef
+
+LIBJULIA_BUILD_DEPLIB := $(call dep_lib_path,$(build_bindir),$(build_shlibdir)/libjulia.$(JL_MAJOR_MINOR_SHLIB_EXT))
+LIBJULIA_INSTALL_DEPLIB := $(call dep_lib_path,$(bindir),$(shlibdir)/libjulia.$(JL_MAJOR_MINOR_SHLIB_EXT))
+
+LIBJULIA_DEBUG_BUILD_DEPLIB := $(call dep_lib_path,$(build_bindir),$(build_shlibdir)/libjulia-debug.$(JL_MAJOR_MINOR_SHLIB_EXT))
+LIBJULIA_DEBUG_INSTALL_DEPLIB := $(call dep_lib_path,$(bindir),$(shlibdir)/libjulia-debug.$(JL_MAJOR_MINOR_SHLIB_EXT))
+
+ifeq ($(OS),WINNT)
+ifeq ($(BINARY),32)
+LIBGCC_NAME := libgcc_s_sjlj-1.$(SHLIB_EXT)
+else
+LIBGCC_NAME := libgcc_s_seh-1.$(SHLIB_EXT)
+endif
+endif
+ifeq ($(OS),Darwin)
+LIBGCC_NAME := libgcc_s.1.$(SHLIB_EXT)
+endif
+ifneq ($(findstring $(OS),Linux FreeBSD),)
+LIBGCC_NAME := libgcc_s.$(SHLIB_EXT).1
+endif
+
+LIBGCC_BUILD_DEPLIB := $(call dep_lib_path,$(build_bindir),$(build_shlibdir)/$(LIBGCC_NAME))
+LIBGCC_INSTALL_DEPLIB := $(call dep_lib_path,$(bindir),$(private_shlibdir)/$(LIBGCC_NAME))
+
+# We only list libjulia and libgcc_s for now.  libgcc_s because FreeBSD needs to load ours,
+# not the system one.  Note that libjulia must always come last.
+LOADER_BUILD_DEP_LIBS = $(LIBGCC_BUILD_DEPLIB):$(LIBJULIA_BUILD_DEPLIB)
+LOADER_DEBUG_BUILD_DEP_LIBS = $(LIBGCC_BUILD_DEPLIB):$(LIBJULIA_DEBUG_BUILD_DEPLIB)
+LOADER_INSTALL_DEP_LIBS = $(LIBGCC_INSTALL_DEPLIB):$(LIBJULIA_INSTALL_DEPLIB)
+LOADER_DEBUG_INSTALL_DEP_LIBS = $(LIBGCC_INSTALL_DEPLIB):$(LIBJULIA_DEBUG_INSTALL_DEPLIB)
 
 # Colors for make
 ifndef VERBOSE
