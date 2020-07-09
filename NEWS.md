@@ -88,6 +88,7 @@ Standard library changes
 * `RegexMatch` objects can now be probed for whether a named capture group exists within it through `haskey()` ([#36717]).
 * For consistency `haskey(r::RegexMatch, i::Integer)` has also been added and returns if the capture group for `i` exists ([#37300]).
 * A new standard library `TOML` has been added for parsing and printing [TOML files](https://toml.io) ([#37034]).
+* Logging (such as `@warn`) no longer catches exceptions in the logger itself ([#36600]).
 
 #### LinearAlgebra
 * New method `LinearAlgebra.issuccess(::CholeskyPivoted)` for checking whether pivoted Cholesky factorization was successful ([#36002]).
