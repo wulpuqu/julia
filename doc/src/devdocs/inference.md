@@ -111,7 +111,7 @@ ci = code_typed(f, tt)[1][1]
 interp = Core.Compiler.NativeInterpreter()
 opt = Core.Compiler.OptimizationState(mi, opt_params, interp)
 # Calculate cost of each statement
-cost(stmt::Expr) = Core.Compiler.statement_cost(stmt, -1, ci, opt.sptypes, opt.slottypes, opt.params)
+cost(stmt::Expr) = Core.Compiler.statement_cost(stmt, -1, ci, opt.sptypes, opt.slottypes, opt_params)
 cost(stmt) = 0
 cst = map(cost, ci.code)
 
