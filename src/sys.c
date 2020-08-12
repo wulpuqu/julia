@@ -593,20 +593,20 @@ JL_DLLEXPORT const char *jl_pathname_for_handle(void *handle)
 JL_DLLEXPORT int jl_dllist(jl_array_t *list)
 {
     DWORD cb, cbNeeded;
-    HMODULE *hMods;
+    HMODULE *hMods = NULL;
     unsigned int i;
     cbNeeded = 1024 * sizeof(*hMods);
     do {
         cb = cbNeeded;
-        hMods = (HMODULE*)malloc_s(cb);
+        hMods = (HMODULE*)realloc_s(hMods, cb);
         if (!EnumProcessModulesEx(GetCurrentProcess(), hMods, cb, &cbNeeded, LIST_MODULES_ALL)) {
           free(hMods);
           return FALSE;
         }
     } while (cb < cbNeeded);
-    for (i = 0; i < (cbNeeded / sizeof(HMODULE)); i++) {
+    for (i = 0; i < cbNeeded / sizeof(HMODULE); i++) {
         jl_array_grow_end((jl_array_t*)list, 1);
-        const char* path = jl_pathname_for_handle(hMods[i]);
+        const char *path = jl_pathname_for_handle(hMods[i]);
         // XXX: change to jl_arrayset if array storage allocation for Array{String,1} changes:
         jl_value_t *v = jl_cstr_to_string(path);
         jl_array_ptr_set(list, jl_array_dim0(list) - 1, v);
