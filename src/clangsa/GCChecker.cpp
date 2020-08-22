@@ -34,6 +34,7 @@
 using std::make_unique;
 #else
 using llvm::make_unique;
+#define PathSensitiveBugReport BugReport
 #endif
 
 namespace {
@@ -42,6 +43,16 @@ using namespace ento;
 
 #define PDP std::shared_ptr<PathDiagnosticPiece>
 #define MakePDP make_unique<PathDiagnosticEventPiece>
+
+static const Stmt *getStmtForDiagnostics(const ExplodedNode *N)
+{
+#if LLVM_VERSION_MAJOR >= 10
+    return N->getStmtForDiagnostics();
+#else
+    return PathDiagnosticLocation::getStmt(N);
+#endif
+}
+
 
 class GCChecker
     : public Checker<
@@ -60,7 +71,7 @@ class GCChecker
   template <typename callback>
   void report_error(callback f, CheckerContext &C, const char *message) const;
   void report_error(CheckerContext &C, const char *message) const {
-    return report_error([](BugReport *) {}, C, message);
+    return report_error([](PathSensitiveBugReport *) {}, C, message);
   }
   void
   report_value_error(CheckerContext &C, SymbolRef Sym, const char *message,
@@ -266,7 +277,7 @@ public:
 #if LLVM_VERSION_MAJOR < 8
                   const ExplodedNode *PrevN,
 #endif
-                  BugReporterContext &BRC, BugReport &BR) override;
+                  BugReporterContext &BRC, PathSensitiveBugReport &BR) override;
   };
 
   class GCValueBugVisitor
@@ -288,17 +299,17 @@ public:
     }
 
     PDP ExplainNoPropagation(const ExplodedNode *N, PathDiagnosticLocation Pos,
-                             BugReporterContext &BRC, BugReport &BR);
+                             BugReporterContext &BRC, PathSensitiveBugReport &BR);
     PDP ExplainNoPropagationFromExpr(const clang::Expr *FromWhere,
                                      const ExplodedNode *N,
                                      PathDiagnosticLocation Pos,
-                                     BugReporterContext &BRC, BugReport &BR);
+                                     BugReporterContext &BRC, PathSensitiveBugReport &BR);
 
     PDP VisitNode(const ExplodedNode *N,
 #if LLVM_VERSION_MAJOR < 8
                   const ExplodedNode *PrevN,
 #endif
-                  BugReporterContext &BRC, BugReport &BR) override;
+                  BugReporterContext &BRC, PathSensitiveBugReport &BR) override;
   }; // namespace
 };
 
@@ -375,19 +386,19 @@ PDP GCChecker::GCBugVisitor::VisitNode(const ExplodedNode *N,
 #if LLVM_VERSION_MAJOR < 8
                                        const ExplodedNode *,
 #endif
-                                       BugReporterContext &BRC, BugReport &BR) {
+                                       BugReporterContext &BRC, PathSensitiveBugReport &BR) {
   const ExplodedNode *PrevN = N->getFirstPred();
   unsigned NewGCDepth = N->getState()->get<GCDepth>();
   unsigned OldGCDepth = PrevN->getState()->get<GCDepth>();
   if (NewGCDepth != OldGCDepth) {
-    PathDiagnosticLocation Pos(PathDiagnosticLocation::getStmt(N),
+    PathDiagnosticLocation Pos(getStmtForDiagnostics(N),
                                BRC.getSourceManager(), N->getLocationContext());
     return MakePDP(Pos, "GC frame changed here.");
   }
   unsigned NewGCState = N->getState()->get<GCDisabledAt>();
   unsigned OldGCState = PrevN->getState()->get<GCDisabledAt>();
   if (false /*NewGCState != OldGCState*/) {
-    PathDiagnosticLocation Pos(PathDiagnosticLocation::getStmt(N),
+    PathDiagnosticLocation Pos(getStmtForDiagnostics(N),
                                BRC.getSourceManager(), N->getLocationContext());
     return MakePDP(Pos, "GC enabledness changed here.");
   }
@@ -396,7 +407,7 @@ PDP GCChecker::GCBugVisitor::VisitNode(const ExplodedNode *N,
 
 PDP GCChecker::GCValueBugVisitor::ExplainNoPropagationFromExpr(
     const clang::Expr *FromWhere, const ExplodedNode *N,
-    PathDiagnosticLocation Pos, BugReporterContext &BRC, BugReport &BR) {
+    PathDiagnosticLocation Pos, BugReporterContext &BRC, PathSensitiveBugReport &BR) {
   const MemRegion *Region =
       N->getState()->getSVal(FromWhere, N->getLocationContext()).getAsRegion();
   SymbolRef Parent = walkToRoot(
@@ -450,7 +461,7 @@ PDP GCChecker::GCValueBugVisitor::ExplainNoPropagationFromExpr(
 
 PDP GCChecker::GCValueBugVisitor::ExplainNoPropagation(
     const ExplodedNode *N, PathDiagnosticLocation Pos, BugReporterContext &BRC,
-    BugReport &BR) {
+    PathSensitiveBugReport &BR) {
   if (N->getLocation().getAs<StmtPoint>()) {
     const clang::Stmt *TheS = N->getLocation().castAs<StmtPoint>().getStmt();
     const clang::CallExpr *CE = dyn_cast<CallExpr>(TheS);
@@ -479,12 +490,11 @@ PDP GCChecker::GCValueBugVisitor::VisitNode(const ExplodedNode *N,
 #if LLVM_VERSION_MAJOR < 8
                                             const ExplodedNode *,
 #endif
-                                            BugReporterContext &BRC,
-                                            BugReport &BR) {
+                                            BugReporterContext &BRC, PathSensitiveBugReport &BR) {
   const ExplodedNode *PrevN = N->getFirstPred();
   const ValueState *NewValueState = N->getState()->get<GCValueMap>(Sym);
   const ValueState *OldValueState = PrevN->getState()->get<GCValueMap>(Sym);
-  const Stmt *Stmt = PathDiagnosticLocation::getStmt(N);
+  const Stmt *Stmt = getStmtForDiagnostics(N);
 
   PathDiagnosticLocation Pos;
   if (Stmt)
@@ -555,7 +565,7 @@ void GCChecker::report_error(callback f, CheckerContext &C,
 
   if (!BT)
     BT.reset(new BugType(this, "Invalid GC thingy", categories::LogicError));
-  auto Report = make_unique<BugReport>(*BT, message, N);
+  auto Report = make_unique<PathSensitiveBugReport>(*BT, message, N);
   Report->addVisitor(make_unique<GCBugVisitor>());
   f(Report.get());
   C.emitReport(std::move(Report));
@@ -571,7 +581,7 @@ void GCChecker::report_value_error(CheckerContext &C, SymbolRef Sym,
 
   if (!BT)
     BT.reset(new BugType(this, "Invalid GC thingy", categories::LogicError));
-  auto Report = make_unique<BugReport>(*BT, message, N);
+  auto Report = make_unique<PathSensitiveBugReport>(*BT, message, N);
   Report->addVisitor(make_unique<GCValueBugVisitor>(Sym));
   Report->addVisitor(make_unique<GCBugVisitor>());
   Report->addVisitor(make_unique<ConditionBRVisitor>());
@@ -625,7 +635,7 @@ bool GCChecker::propagateArgumentRootedness(CheckerContext &C,
     const ValueState *ValS = State->get<GCValueMap>(ArgSym);
     if (!ValS) {
       report_error(
-          [&](BugReport *Report) {
+          [&](PathSensitiveBugReport *Report) {
             Report->addNote(
                 "Tried to find root for this parameter in inlined call",
                 PathDiagnosticLocation::create(P, C.getSourceManager()));
