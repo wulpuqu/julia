@@ -53,6 +53,7 @@ let
             :Statistics,
             :MozillaCACerts_jll,
             :LibCURL_jll,
+            :LibCURL,
         ]
 
     maxlen = reduce(max, textwidth.(string.(stdlibs)); init=0)
