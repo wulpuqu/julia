@@ -1154,7 +1154,7 @@ function assemble_inline_todo!(ir::IRCode, sv::OptimizationState)
             continue
         end
 
-        nu = countunionsplit(sig.atypes)
+        nu = unionsplitcost(sig.atypes)
         if nu == 1 || nu > sv.params.MAX_UNION_SPLITTING
             if !isa(info, MethodMatchInfo)
                 info = recompute_method_matches(sig.atype, sv)

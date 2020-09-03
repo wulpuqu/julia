@@ -112,14 +112,21 @@ function tuple_tail_elem(@nospecialize(init), ct::Vector{Any})
     return Vararg{widenconst(t)}
 end
 
-function countunionsplit(atypes::Union{SimpleVector,Vector{Any}})
+# Gives a cost function over the effort to switch a tuple-union representation
+# as a cartesian product, relative to the size of the original representation.
+# Thus, we count the longest element as being roughly invariant to being inside
+# or outside of the Tuple/Union nesting.
+function unionsplitcost(atypes::Union{SimpleVector,Vector{Any}})
     nu = 1
+    max = 2
     for ti in atypes
         if isa(ti, Union)
-            nu, ovf = Core.Intrinsics.checked_smul_int(nu, unionlen(ti::Union))
-            if ovf
-                return typemax(Int)
+            nti = unionlen(ti)
+            if nti > max
+                max, nti = nti, max
             end
+            nu, ovf = Core.Intrinsics.checked_smul_int(nu, nti)
+            ovf && return typemax(Int)
         end
     end
     return nu
