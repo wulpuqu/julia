@@ -13,6 +13,8 @@ New language features
 * The library name passed to `ccall` or `@ccall` can now be an expression involving
   global variables and function calls. The expression will be evaluated the first
   time the `ccall` executes ([#36458]).
+* The syntax `import A as B` (plus `import A: x as y`, etc.) can now be used to
+  rename imported modules and identifiers ([#1255]).
 
 Language changes
 ----------------
