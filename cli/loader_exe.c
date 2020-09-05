@@ -19,7 +19,8 @@ __attribute__ ((visibility("default"))) JL_CONST_FUNC void * jl_get_ptls_states_
 int mainCRTStartup(void)
 {
     int argc;
-    LPWSTR * argv = CommandLineToArgv(GetCommandLine(), &argc);
+    LPWSTR * wargv = CommandLineToArgv(GetCommandLine(), &argc);
+    char ** argv = (char **)malloc(sizeof(char *)*argc);
     setup_stdio();
 #else
 int main(int argc, char * argv[])
@@ -31,18 +32,17 @@ int main(int argc, char * argv[])
 #ifdef _OS_WINDOWS_
     // Convert Windows wchar_t values to UTF8
     for (int i=0; i<argc; i++) {
-        size_t max_arg_len = 4*wcslen(argv[i]);
-        char * new_argv_i = (char *)alloca(max_arg_len);
-        if (!wchar_to_utf8(argv[i], new_argv_i, max_arg_len)) {
+        size_t max_arg_len = 4*wcslen(wargv[i]);
+        argv[i] = (char *)malloc(max_arg_len);
+        if (!wchar_to_utf8(wargv[i], argv[i], max_arg_len)) {
             print_stderr("Unable to convert all arguments to UTF-8!\n");
             return 1;
         }
-        argv[i] = (wchar_t *)new_argv_i;
     }
 #endif
 
     // Call load_repl with our initialization arguments:
-    int ret = load_repl(exe_dir, argc, (char **)argv);
+    int ret = load_repl(exe_dir, argc, argv);
 
     // On Windows we're running without the CRT that would do this for us
     exit(ret);

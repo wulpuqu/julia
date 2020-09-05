@@ -15,6 +15,8 @@
 #define memcpy loader_memcpy
 #define dirname loader_dirname
 #define strchr loader_strchr
+#define malloc loader_malloc
+#define realloc loader_realloc
 #endif
 
 #ifdef _OS_WINDOWS_

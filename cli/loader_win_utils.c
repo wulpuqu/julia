@@ -22,15 +22,21 @@ int loader_fwrite(const WCHAR *str, size_t nchars, FILE *out) {
     return -1;
 }
 
-int loader_fputs(const char *str, FILE *out)
-{
+int loader_fputs(const char *str, FILE *out) {
     wchar_t wstr[1024];
     utf8_to_wchar(str, wstr, 1024);
     return fwrite(wstr, wcslen(wstr), out);
 }
 
-LPWSTR *CommandLineToArgv(LPWSTR lpCmdLine, int *pNumArgs)
-{
+void * loader_malloc(const size_t size) {
+    return HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, size);
+}
+
+void * loader_realloc(void * mem, const size_t size) {
+    return HeapReAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, mem, size);
+}
+
+LPWSTR *CommandLineToArgv(LPWSTR lpCmdLine, int *pNumArgs) {
     LPWSTR out = lpCmdLine;
     LPWSTR cmd = out;
     unsigned MaxEntries = 4;
@@ -39,7 +45,7 @@ LPWSTR *CommandLineToArgv(LPWSTR lpCmdLine, int *pNumArgs)
     int empty = 1;
     LPWSTR *cmds;
     *pNumArgs = 0;
-    cmds = (LPWSTR*)HeapAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, sizeof(LPWSTR) * MaxEntries);
+    cmds = (LPWSTR*)malloc(sizeof(LPWSTR) * MaxEntries);
     while (1) {
         WCHAR c = *lpCmdLine++;
         switch (c) {
@@ -73,7 +79,7 @@ LPWSTR *CommandLineToArgv(LPWSTR lpCmdLine, int *pNumArgs)
                 empty = 1;
                 if (*pNumArgs >= MaxEntries - 1) {
                     MaxEntries *= 2;
-                    cmds = (LPWSTR*)HeapReAlloc(GetProcessHeap(), HEAP_GENERATE_EXCEPTIONS, cmds, sizeof(LPWSTR) * MaxEntries);
+                    cmds = (LPWSTR*)realloc(cmds, sizeof(LPWSTR) * MaxEntries);
                 }
             }
         }
