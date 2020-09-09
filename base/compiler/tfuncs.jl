@@ -381,6 +381,9 @@ function nfields_tfunc(@nospecialize(x))
             return Const(isdefined(x, :types) ? length(x.types) : length(x.name.names))
         end
     end
+    if isa(x, Union)
+        return tmerge(nfields_tfunc(x.a), nfields_tfunc(x.b))
+    end
     return Int
 end
 add_tfunc(nfields, 1, 1, nfields_tfunc, 1)
